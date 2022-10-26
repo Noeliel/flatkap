@@ -26,9 +26,11 @@ pub fn touch_file_in_dir(file_name: &str, dir: &PathBuf) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn remove_file_in_dir(file_name: &str, dir: &Path) {
+pub fn remove_file_in_dir(file_name: &str, dir: &Path) -> Result<(), Error> {
     let mut file_path = dir.to_path_buf();
     file_path.push(file_name);
 
-    let _res = fs::remove_file(file_path);
+    fs::remove_file(file_path)?;
+
+    Ok(())
 }

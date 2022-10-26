@@ -74,6 +74,6 @@ impl FlatpakSession {
 impl Drop for FlatpakSession {
     fn drop(&mut self) {
         self.kill_lingering_processes_if_necessary();
-        fs::remove_file_in_dir(&self.pid, &self.tmp_dir);
+        let _res = fs::remove_file_in_dir(&self.pid, &self.tmp_dir);
     }
 }
