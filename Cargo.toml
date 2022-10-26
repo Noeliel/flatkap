@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2022 Noeliel
+#
+# SPDX-License-Identifier: LGPL-2.0-only
+
+[package]
+name = "flatkap"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# compile with this for min size (might need to omit "+nightly"):
+# cargo +nightly build --release -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --target x86_64-unknown-linux-gnu
+
+[profile.release]
+lto = true
+panic = 'abort'
+codegen-units = 1
+opt-level = "z"
+# opt-level = "s"
+
+[dependencies]
+libc = "0.2.136"
