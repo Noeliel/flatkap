@@ -77,7 +77,7 @@ impl FlatpakSession {
             };
 
             if fs::touch_file_in_dir(&session.child_pid, &session.tmp_dir).is_err() {
-                return Err("Failed to create session. Couldn't setup lockfile.");
+                return Err("Failed to create session. Couldn't set up lockfile.");
             }
 
             return Ok(session);
