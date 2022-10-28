@@ -3,7 +3,7 @@
 A basic `flatpak run` wrapper that tries to kill flatpak-session-helper and flatpak-portal after you quit your flatpak app.
 
 It can handle multiple flatpak apps running at the same time and will only attempt to kill the aforementioned processes after you quit your *last* app.  
-Will not work with some apps that do weird forking magic to detach themselves from your shell like VSCode and similar.
+Will not work with some apps that do weird forking magic to detach themselves from your shell like VSCode and similar (but I'm working on a solution).
 
 ## Usage
 
