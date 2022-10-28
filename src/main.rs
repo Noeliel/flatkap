@@ -7,7 +7,5 @@ mod flatpaksession;
 use flatpaksession::FlatpakSession;
 
 fn main() {
-    // println!("========== Flatkap: Flatpak wrapper ==========");
-    FlatpakSession::launch();
-    // println!("============== Quitting Flatkap ==============");
+    FlatpakSession::run();
 }
