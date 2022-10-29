@@ -178,8 +178,8 @@ impl FlatpakSession {
             if 1 == dir_contents.count() {
                 let _result = Command::new(CMD_KILLALL)
                     .args([PROC_SESSION_HELPER])
-                    .spawn();
-                let _result = Command::new(CMD_KILLALL).args([PROC_PORTAL]).spawn();
+                    .output();
+                let _result = Command::new(CMD_KILLALL).args([PROC_PORTAL]).output();
             }
         }
     }
