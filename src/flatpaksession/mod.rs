@@ -10,7 +10,7 @@ use std::{
     collections::LinkedList,
     env,
     ffi::OsStr,
-    io::Error,
+    io::{Error, ErrorKind},
     path::PathBuf,
     process::{Child, Command},
 };
@@ -67,13 +67,13 @@ impl FlatpakSession {
         let mut tmp_dir = env::temp_dir();
         tmp_dir.push(TMP_DIR_FLATKAP.to_string() + "-" + &uid);
 
-        if let Ok(child) = FlatpakSession::launch_child_proc(args) {
-            let pid = child.id().to_string();
+        if let Ok(child_proc) = FlatpakSession::launch_child_proc(args) {
+            let child_pid = child_proc.id().to_string();
             let session = FlatpakSession {
                 uid,
                 tmp_dir,
-                child_proc: child,
-                child_pid: pid,
+                child_proc,
+                child_pid,
             };
 
             if fs::touch_file_in_dir(&session.child_pid, &session.tmp_dir).is_err() {
@@ -86,91 +86,8 @@ impl FlatpakSession {
         Err("Failed to create session. Your flatpak application didn't launch successfully!")
     }
 
-    fn launch_child_proc<I, S>(args: I) -> Result<Child, Error>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        Command::new(CMD_FLATPAK).args(args).spawn()
-    }
-
     fn wait_for_child(&mut self) -> bool {
-        self.child_proc.wait().is_ok() && self.try_locate_and_wait_for_app_bwrap()
-    }
-
-    // TODO: clean this up
-    fn try_locate_and_wait_for_app_bwrap(&mut self) -> bool {
-        let mut run_dir = PathBuf::from(RUN_DIR_PREFIX);
-        run_dir.push(&self.uid);
-        run_dir.push(RUN_DIR_SUFFIX);
-
-        // locate all potential bwrap directories... (this is a bit messy)
-        if let Ok(contents) = run_dir.read_dir() {
-            // try to find the one that holds a "pid" file which contains our target pid as text...
-            let bwrap_dir = contents.into_iter().find(|file| {
-                if let Ok(file) = file {
-                    // file exists
-
-                    if let Ok(file_type) = file.file_type() {
-                        // file type can be determined
-
-                        if file_type.is_dir() {
-                            // file type is dir
-
-                            if let Ok(file_pid) =
-                                fs::read_file_in_dir(RUN_FILE_PID, file.path().as_path())
-                            {
-                                // pid file exists and we got content
-
-                                if file_pid == self.child_pid {
-                                    // we found our path
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                false
-            });
-
-            // if we found our path, try to parse the bwrap pid and wait for it to quit
-            if let Some(Ok(bwrap_dir)) = bwrap_dir {
-                let bwrap_dir = bwrap_dir.path();
-
-                if let Ok(bwrap_info_raw) = fs::read_file_in_dir(RUN_FILE_INFO, bwrap_dir.as_path())
-                {
-                    let bwrap_info: Result<Value, _> = serde_json::from_str(&bwrap_info_raw);
-
-                    if let Ok(info) = bwrap_info {
-                        if let Some(pid) = info.get(RUN_FILE_INFO_FIELD_PID) {
-                            if let Some(pid) = pid.as_u64() {
-                                // we have a pid; launch `tail --pid=<pid> -f /dev/null` to wait for the process to quit
-
-                                let tail_arg_pid = format!("--pid={}", pid);
-                                let tail_arg_follow = "-f";
-                                let tail_arg_devnull = "/dev/null";
-
-                                return Command::new(CMD_TAIL)
-                                    .args([
-                                        tail_arg_pid,
-                                        tail_arg_follow.to_string(),
-                                        tail_arg_devnull.to_string(),
-                                    ])
-                                    .output()
-                                    .is_ok();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        false
-    }
-
-    fn quit(&mut self) {
-        let _result = fs::remove_file_in_dir(&self.child_pid, &self.tmp_dir);
+        self.child_proc.wait().is_ok() && self.wait_for_app_bwrap()
     }
 
     fn kill_lingering_processes_if_necessary(&self) {
@@ -182,5 +99,92 @@ impl FlatpakSession {
                 let _result = Command::new(CMD_KILLALL).args([PROC_PORTAL]).output();
             }
         }
+    }
+
+    fn quit(&mut self) {
+        let _result = fs::remove_file_in_dir(&self.child_pid, &self.tmp_dir);
+    }
+
+    fn launch_child_proc<I, S>(args: I) -> Result<Child, Error>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        Command::new(CMD_FLATPAK).args(args).spawn()
+    }
+
+    fn wait_for_app_bwrap(&mut self) -> bool {
+        if let Ok(bwrap_pid) = self.try_find_bwrap_pid() {
+            // we have a pid; launch `tail --pid=<pid> -f /dev/null` to wait for the process to quit
+
+            let tail_arg_pid = format!("--pid={}", bwrap_pid);
+            let tail_arg_follow = "-f";
+            let tail_arg_devnull = "/dev/null";
+
+            return Command::new(CMD_TAIL)
+                .args([
+                    tail_arg_pid,
+                    tail_arg_follow.to_string(),
+                    tail_arg_devnull.to_string(),
+                ])
+                .output()
+                .is_ok();
+        }
+
+        false
+    }
+
+    fn try_find_bwrap_pid(&self) -> Result<u64, Error> {
+        let mut run_dir = PathBuf::from(RUN_DIR_PREFIX);
+        run_dir.push(&self.uid);
+        run_dir.push(RUN_DIR_SUFFIX);
+
+        // locate all potential bwrap directories...
+        let contents = run_dir.read_dir()?;
+
+        // try to find the one that holds a "pid" file which contains our target pid as text...
+        let bwrap_dir = contents
+            .into_iter()
+            .find(|file| {
+                || -> Result<bool, Error> {
+                    let file = file.as_ref().map_err(|_| {
+                        Error::new(ErrorKind::NotFound, "Failed to access directory entry.")
+                    })?;
+
+                    let file_type = file.file_type()?; // if file type can be determined
+
+                    if file_type.is_dir() {
+                        let file_pid = fs::read_file_in_dir(RUN_FILE_PID, file.path().as_path())?; // if pid file exists and we got content
+
+                        if file_pid == self.child_pid {
+                            // we found our path
+                            return Ok(true);
+                        }
+                    }
+
+                    Ok(false)
+                }()
+                .unwrap_or(false) // return false on any error from the closure
+            })
+            .unwrap_or_else(|| {
+                Err(Error::new(
+                    ErrorKind::NotFound,
+                    "Failed to find bwrap directory for app.",
+                ))
+            })?;
+
+        let bwrap_dir = bwrap_dir.path();
+        let bwrap_info_raw = fs::read_file_in_dir(RUN_FILE_INFO, bwrap_dir.as_path())?;
+        let bwrap_info: Value = serde_json::from_str(&bwrap_info_raw)?;
+        let pid = bwrap_info
+            .get(RUN_FILE_INFO_FIELD_PID)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Failed to read app bwrap pid."))?;
+
+        pid.as_u64().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidData,
+                "Failed to convert pid into an integer.",
+            )
+        })
     }
 }
