@@ -9,7 +9,6 @@ It can handle multiple flatpak apps running at the same time and will only attem
 * this
 * flatpak
 * killall
-* tail
 
 ## Usage
 

@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: LGPL-2.0-only
 
 mod fs;
-mod libc_safe;
 
+use crate::util::wait_for_pid_blocking;
 use serde_json::{self, Value};
 use std::{
     collections::LinkedList,
@@ -25,7 +25,6 @@ const RUN_FILE_INFO_FIELD_PID: &str = "child-pid";
 
 const CMD_FLATPAK: &str = "flatpak";
 const CMD_KILLALL: &str = "killall";
-const CMD_TAIL: &str = "tail";
 
 const PROC_SESSION_HELPER: &str = "flatpak-session-helper";
 const PROC_PORTAL: &str = "flatpak-portal";
@@ -54,7 +53,7 @@ impl FlatpakSession {
 
                 session.quit();
             }
-            Err(e) => println!("{}", e),
+            Err(e) => println!("{e}"),
         }
     }
 
@@ -63,7 +62,7 @@ impl FlatpakSession {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let uid = libc_safe::getuid().to_string();
+        let uid = unsafe { libc::getuid() }.to_string();
         let mut tmp_dir = env::temp_dir();
         tmp_dir.push(TMP_DIR_FLATKAP.to_string() + "-" + &uid);
 
@@ -115,20 +114,12 @@ impl FlatpakSession {
 
     fn wait_for_app_bwrap(&mut self) -> bool {
         if let Ok(bwrap_pid) = self.try_find_bwrap_pid() {
-            // we have a pid; launch `tail --pid=<pid> -f /dev/null` to wait for the process to quit
+            let pid: i32 = bwrap_pid.try_into().unwrap_or(-1);
 
-            let tail_arg_pid = format!("--pid={}", bwrap_pid);
-            let tail_arg_follow = "-f";
-            let tail_arg_devnull = "/dev/null";
-
-            return Command::new(CMD_TAIL)
-                .args([
-                    tail_arg_pid,
-                    tail_arg_follow.to_string(),
-                    tail_arg_devnull.to_string(),
-                ])
-                .output()
-                .is_ok();
+            if pid > 0 {
+                wait_for_pid_blocking(pid);
+                return true;
+            }
         }
 
         false
