@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2022 Noeliel
+//
+// SPDX-License-Identifier: LGPL-2.0-only
+
 use std::ptr::null_mut;
 
 pub fn wait_for_pid_blocking(pid: i32) {
