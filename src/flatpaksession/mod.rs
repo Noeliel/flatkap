@@ -2,15 +2,16 @@
 //
 // SPDX-License-Identifier: LGPL-2.0-only
 
-mod fs;
-
-use crate::util::wait_for_pid_blocking;
+use crate::{
+    error::Result,
+    fs,
+    util::{find_named_process_pids, process_send_signal, process_wait_blocking},
+};
 use serde_json::{self, Value};
 use std::{
     collections::LinkedList,
     env,
     ffi::OsStr,
-    io::{Error, ErrorKind},
     path::PathBuf,
     process::{Child, Command},
 };
@@ -24,7 +25,6 @@ const RUN_FILE_INFO: &str = "bwrapinfo.json";
 const RUN_FILE_INFO_FIELD_PID: &str = "child-pid";
 
 const CMD_FLATPAK: &str = "flatpak";
-const CMD_KILLALL: &str = "killall";
 
 const PROC_SESSION_HELPER: &str = "flatpak-session-helper";
 const PROC_PORTAL: &str = "flatpak-portal";
@@ -37,27 +37,18 @@ pub struct FlatpakSession {
 }
 
 impl FlatpakSession {
-    pub fn run() {
+    pub fn run() -> Result<()> {
         let mut args: LinkedList<_> = env::args().collect();
         args.pop_front();
 
-        match FlatpakSession::new(args) {
-            Ok(mut session) => {
-                // child is running ...
+        let mut session = FlatpakSession::new(args)?;
+        session.wait_for_child()?;
+        session.kill_lingering_processes_if_necessary()?;
 
-                if session.wait_for_child() {
-                    session.kill_lingering_processes_if_necessary();
-                } else {
-                    println!("The flatpak session behaved unexpectedly. Flatkap won't attempt to kill lingering processes.");
-                }
-
-                session.quit();
-            }
-            Err(e) => println!("{e}"),
-        }
+        Ok(())
     }
 
-    fn new<I, S>(args: I) -> Result<Self, &'static str>
+    fn new<I, S>(args: I) -> Result<Self>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -75,107 +66,91 @@ impl FlatpakSession {
                 child_pid,
             };
 
-            if fs::touch_file_in_dir(&session.child_pid, &session.tmp_dir).is_err() {
-                return Err("Failed to create session. Couldn't set up lockfile.");
-            }
+            fs::touch_file_in_dir(&session.child_pid, &session.tmp_dir)?;
 
             return Ok(session);
         }
 
-        Err("Failed to create session. Your flatpak application didn't launch successfully!")
+        Err("Failed to create session. Your flatpak application didn't launch successfully!".into())
     }
 
-    fn wait_for_child(&mut self) -> bool {
-        self.child_proc.wait().is_ok() && self.wait_for_app_bwrap()
+    fn wait_for_child(&mut self) -> Result<()> {
+        self.child_proc.wait()?;
+        self.wait_for_app_bwrap()?;
+        Ok(())
     }
 
-    fn kill_lingering_processes_if_necessary(&self) {
-        if let Ok(dir_contents) = self.tmp_dir.read_dir() {
-            if 1 == dir_contents.count() {
-                let _result = Command::new(CMD_KILLALL)
-                    .args([PROC_SESSION_HELPER])
-                    .output();
-                let _result = Command::new(CMD_KILLALL).args([PROC_PORTAL]).output();
+    fn kill_lingering_processes_if_necessary(&self) -> Result<()> {
+        let dir_contents = self.tmp_dir.read_dir()?;
+
+        if 1 == dir_contents.count() {
+            for pid in find_named_process_pids(PROC_SESSION_HELPER).unwrap_or_default() {
+                _ = process_send_signal(pid, libc::SIGTERM);
+            }
+            for pid in find_named_process_pids(PROC_PORTAL).unwrap_or_default() {
+                _ = process_send_signal(pid, libc::SIGTERM);
             }
         }
+
+        Ok(())
     }
 
-    fn quit(&mut self) {
-        let _result = fs::remove_file_in_dir(&self.child_pid, &self.tmp_dir);
-    }
-
-    fn launch_child_proc<I, S>(args: I) -> Result<Child, Error>
+    fn launch_child_proc<I, S>(args: I) -> Result<Child>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        Command::new(CMD_FLATPAK).args(args).spawn()
+        Ok(Command::new(CMD_FLATPAK).args(args).spawn()?)
     }
 
-    fn wait_for_app_bwrap(&mut self) -> bool {
-        if let Ok(bwrap_pid) = self.try_find_bwrap_pid() {
-            let pid: i32 = bwrap_pid.try_into().unwrap_or(-1);
-
-            if pid > 0 {
-                wait_for_pid_blocking(pid);
-                return true;
-            }
-        }
-
-        false
+    fn wait_for_app_bwrap(&mut self) -> Result<()> {
+        let bwrap_pid = self.try_find_bwrap_pid()?;
+        process_wait_blocking(bwrap_pid);
+        Ok(())
     }
 
-    fn try_find_bwrap_pid(&self) -> Result<u64, Error> {
+    fn try_find_bwrap_pid(&self) -> Result<i32> {
         let mut run_dir = PathBuf::from(RUN_DIR_PREFIX);
         run_dir.push(&self.uid);
         run_dir.push(RUN_DIR_SUFFIX);
 
         // locate all potential bwrap directories...
-        let contents = run_dir.read_dir()?;
+        let mut contents = run_dir.read_dir()?;
 
         // try to find the one that holds a "pid" file which contains our target pid as text...
         let bwrap_dir = contents
-            .into_iter()
-            .find(|file| {
-                || -> Result<bool, Error> {
-                    let file = file.as_ref().map_err(|_| {
-                        Error::new(ErrorKind::NotFound, "Failed to access directory entry.")
-                    })?;
+            .find_map(|f| {
+                let file = f.as_ref().ok()?;
+                let file_type = file.file_type().ok()?; // if file type can be determined
 
-                    let file_type = file.file_type()?; // if file type can be determined
+                if file_type.is_dir() {
+                    let file_pid =
+                        fs::read_file_in_dir(RUN_FILE_PID, file.path().as_path()).ok()?; // if pid file exists and we got content
 
-                    if file_type.is_dir() {
-                        let file_pid = fs::read_file_in_dir(RUN_FILE_PID, file.path().as_path())?; // if pid file exists and we got content
-
-                        if file_pid == self.child_pid {
-                            // we found our path
-                            return Ok(true);
-                        }
+                    if file_pid == self.child_pid {
+                        // we found our path
+                        return Some(f);
                     }
+                }
 
-                    Ok(false)
-                }()
-                .unwrap_or(false) // return false on any error from the closure
+                None
             })
-            .unwrap_or_else(|| {
-                Err(Error::new(
-                    ErrorKind::NotFound,
-                    "Failed to find bwrap directory for app.",
-                ))
-            })?;
+            .ok_or("No pidfs dir found for pid.")??;
 
         let bwrap_dir = bwrap_dir.path();
         let bwrap_info_raw = fs::read_file_in_dir(RUN_FILE_INFO, bwrap_dir.as_path())?;
-        let bwrap_info: Value = serde_json::from_str(&bwrap_info_raw)?;
+        let bwrap_info: Value =
+            serde_json::from_str(&bwrap_info_raw).map_err(|_| "Failed to parse bwrapinfo.json.")?;
         let pid = bwrap_info
             .get(RUN_FILE_INFO_FIELD_PID)
-            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Failed to read app bwrap pid."))?;
+            .ok_or("Failed to find pid.")?;
 
-        pid.as_u64().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidData,
-                "Failed to convert pid into an integer.",
-            )
-        })
+        Ok(pid.as_u64().ok_or("Failed to convert pid to integer.")? as i32)
+    }
+}
+
+impl Drop for FlatpakSession {
+    fn drop(&mut self) {
+        let _ = fs::remove_file_in_dir(&self.child_pid, &self.tmp_dir);
     }
 }

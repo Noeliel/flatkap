@@ -2,13 +2,13 @@
 //
 // SPDX-License-Identifier: LGPL-2.0-only
 
+use crate::Result;
 use std::{
     fs,
-    io::Error,
     path::{Path, PathBuf},
 };
 
-pub fn touch_file_in_dir(file_name: &str, dir: &PathBuf) -> Result<(), Error> {
+pub fn touch_file_in_dir(file_name: &str, dir: &PathBuf) -> Result<()> {
     if !dir.exists() {
         fs::create_dir_all(dir)?;
     }
@@ -21,18 +21,15 @@ pub fn touch_file_in_dir(file_name: &str, dir: &PathBuf) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn read_file_in_dir(file_name: &str, dir: &Path) -> Result<String, Error> {
+pub fn read_file_in_dir(file_name: &str, dir: &Path) -> Result<String> {
     let mut file_path = dir.to_path_buf();
     file_path.push(file_name);
 
-    fs::read_to_string(file_path)
+    Ok(fs::read_to_string(file_path)?)
 }
 
-pub fn remove_file_in_dir(file_name: &str, dir: &Path) -> Result<(), Error> {
-    let mut file_path = dir.to_path_buf();
-    file_path.push(file_name);
-
-    fs::remove_file(file_path)?;
+pub fn remove_file_in_dir(file_name: &str, dir: &Path) -> Result<()> {
+    fs::remove_file(dir.join(file_name))?;
 
     Ok(())
 }

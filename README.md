@@ -4,12 +4,6 @@ A basic `flatpak run` wrapper that tries to kill flatpak-session-helper and flat
 
 It can handle multiple flatpak apps running at the same time and will only attempt to kill the aforementioned processes after you quit your *last* app.  
 
-## Dependencies
-
-* this
-* flatpak
-* killall
-
 ## Usage
 
 Build and install to your distribution's appropriate directory.  
