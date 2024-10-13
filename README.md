@@ -1,5 +1,7 @@
 # Flatkap
 
+[![Release Build](https://github.com/Noeliel/flatkap/actions/workflows/rust_release.yml/badge.svg)](https://github.com/Noeliel/flatkap/actions/workflows/rust_release.yml)
+
 A basic `flatpak run` wrapper that tries to kill flatpak-session-helper and flatpak-portal after you quit your flatpak app.
 
 It can handle multiple flatpak apps running at the same time and will only attempt to kill the aforementioned processes after you quit your *last* app.  
