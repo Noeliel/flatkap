@@ -3,8 +3,31 @@ module(
     version = "0.3.0"
 )
 
+################################################################################
+#                                  Bazel Deps                                  #
+################################################################################
+## Bazel Dep Registry: https://registry.bazel.build/
+# Bazel Deps
 bazel_dep(name = "rules_rust", version = "0.57.1")
 
+################################################################################
+#                                  Toolchains                                  #
+################################################################################
+RUST_EDITION = "2021"
+# RUST_VERSION = "nightly/2023-09-07"
+RUST_VERSION = "1.80.1"
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = RUST_EDITION,
+    versions = [RUST_VERSION],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+################################################################################
+#                                 Rust Crates                                  #
+################################################################################
 crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
 
 crate.spec(package = "libc", version = "0.2.136")
