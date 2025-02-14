@@ -1,0 +1,15 @@
+module(
+    name = "flatkap",
+    version = "0.3.0"
+)
+
+bazel_dep(name = "rules_rust", version = "0.57.1")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+
+crate.spec(package = "libc", version = "0.2.136")
+crate.spec(package = "serde", version = "1.0")
+crate.spec(package = "serde_json", version = "1.0")
+
+crate.from_specs()
+use_repo(crate, "crates")
