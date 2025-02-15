@@ -7,7 +7,6 @@ module(
 #                                  Bazel Deps                                  #
 ################################################################################
 ## Bazel Dep Registry: https://registry.bazel.build/
-# Bazel Deps
 bazel_dep(name = "rules_rust", version = "0.57.1")
 
 ################################################################################
