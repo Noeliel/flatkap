@@ -84,11 +84,10 @@ impl FlatpakSession {
         let dir_contents = self.tmp_dir.read_dir()?;
 
         if 1 == dir_contents.count() {
-            for pid in find_named_process_pids(PROC_SESSION_HELPER).unwrap_or_default() {
-                _ = process_send_signal(pid, libc::SIGTERM);
-            }
-            for pid in find_named_process_pids(PROC_PORTAL).unwrap_or_default() {
-                _ = process_send_signal(pid, libc::SIGTERM);
+            for proc in [PROC_SESSION_HELPER, PROC_PORTAL] {
+                for pid in find_named_process_pids(proc).unwrap_or_default() {
+                    _ = process_send_signal(pid, libc::SIGTERM);
+                }
             }
         }
 
